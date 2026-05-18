@@ -36,7 +36,7 @@ PREMIUM_PRO_PRICE = 50
 REFERRAL_BONUS = 3
 
 bot = telebot.TeleBot(TOKEN)
-active_tasks = {}  # для хранения активных примеров
+active_tasks = {}
 
 # ===== БАЗА ДАННЫХ =====
 def init_db():
@@ -207,7 +207,7 @@ def start_cmd(message):
     bot.send_message(message.chat.id,
         f"🤖 *ReshiBot*\n\n"
         f"📸 Отправь фото — ИИ решит\n"
-        f"✍️ Напиши вопрос — реши уравнение\n"
+        f"✍️ Напиши вопрос\n"
         f"🎲 Случайный пример — проверь себя\n\n"
         f"💎 {status}\n\n👇",
         parse_mode='Markdown', reply_markup=markup)
@@ -273,7 +273,7 @@ def text_handler(m):
     text = m.text.strip()
     if text.startswith('/'):
         return
-    # Если есть активный пример — проверяем ответ
+    # Проверяем, есть ли активный пример
     if user_id in active_tasks:
         try:
             ans = int(text)
@@ -284,10 +284,10 @@ def text_handler(m):
                 bot.reply_to(m, f"❌ Неверно! {active_tasks[user_id]['example']} = {correct}", reply_markup=quick_buttons())
             del active_tasks[user_id]
             return
-        except:
-            bot.reply_to(m, "❓ Напиши число!", reply_markup=quick_buttons())
+        except ValueError:
+            bot.reply_to(m, "❓ Напиши ЧИСЛО — твой ответ на пример.", reply_markup=quick_buttons())
             return
-    # Если нет активного примера — обрабатываем как запрос к ИИ
+    # Если активного примера нет — ИИ
     if not can_send(user_id):
         bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов/день. Купи Premium!", reply_markup=quick_buttons())
         return
