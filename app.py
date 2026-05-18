@@ -22,10 +22,8 @@ model = None
 for m in genai.list_models():
     if 'generateContent' in m.supported_generation_methods:
         model = genai.GenerativeModel(m.name)
-        print(f"✅ Использую модель: {m.name}")
+        print(f"✅ Модель: {m.name}")
         break
-if model is None:
-    print("❌ Нет доступных моделей")
 
 # ===== ЛИМИТЫ =====
 FREE_LIMIT = 4
@@ -45,12 +43,12 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
-            messages_today INTEGER DEFAULT 0,
+            usage_today INTEGER DEFAULT 0,
             last_date TEXT,
             premium_level INTEGER DEFAULT 0,
             referred_by INTEGER DEFAULT 0,
             referral_count INTEGER DEFAULT 0,
-            bonus_messages INTEGER DEFAULT 0,
+            bonus_limit INTEGER DEFAULT 0,
             username TEXT DEFAULT ''
         )
     ''')
@@ -60,27 +58,27 @@ def init_db():
 def get_user(user_id):
     conn = sqlite3.connect('bot_users.db')
     c = conn.cursor()
-    c.execute('SELECT messages_today, last_date, premium_level, referred_by, referral_count, bonus_messages, username FROM users WHERE user_id = ?', (user_id,))
+    c.execute('SELECT usage_today, last_date, premium_level, referred_by, referral_count, bonus_limit, username FROM users WHERE user_id = ?', (user_id,))
     row = c.fetchone()
     conn.close()
     if row:
         return {
-            'messages_today': row[0],
+            'usage_today': row[0],
             'last_date': row[1],
             'premium_level': row[2],
             'referred_by': row[3],
             'referral_count': row[4],
-            'bonus_messages': row[5],
+            'bonus_limit': row[5],
             'username': row[6]
         }
     else:
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect('bot_users.db')
         c = conn.cursor()
-        c.execute('INSERT INTO users (user_id, messages_today, last_date, premium_level, referred_by, referral_count, bonus_messages, username) VALUES (?, 0, ?, 0, 0, 0, 0, ?)', (user_id, today, ''))
+        c.execute('INSERT INTO users (user_id, usage_today, last_date, premium_level, referred_by, referral_count, bonus_limit, username) VALUES (?, 0, ?, 0, 0, 0, 0, ?)', (user_id, today, ''))
         conn.commit()
         conn.close()
-        return {'messages_today': 0, 'last_date': today, 'premium_level': 0, 'referred_by': 0, 'referral_count': 0, 'bonus_messages': 0, 'username': ''}
+        return {'usage_today': 0, 'last_date': today, 'premium_level': 0, 'referred_by': 0, 'referral_count': 0, 'bonus_limit': 0, 'username': ''}
 
 def update_user(user_id, **kwargs):
     conn = sqlite3.connect('bot_users.db')
@@ -98,29 +96,29 @@ def get_user_limit(user):
         base = PREMIUM_LIGHT_LIMIT
     if base == PREMIUM_PRO_LIMIT:
         return base
-    return base + user['bonus_messages']
+    return base + user['bonus_limit']
 
-def can_send(user_id):
-    # Админ — безлимит
+def can_use(user_id):
+    """Проверяет, может ли пользователь отправить запрос (и ИИ, и калькулятор). Админ — всегда может."""
     if user_id in ADMINS:
         return True
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
-        update_user(user_id, messages_today=0)
+        update_user(user_id, usage_today=0)
         return True
-    return user['messages_today'] < get_user_limit(user)
+    return user['usage_today'] < get_user_limit(user)
 
-def increment_count(user_id):
-    # Админ не тратит лимит
+def increment_usage(user_id):
+    """Увеличивает счётчик использованных запросов (только для полезных действий). Админа не считаем."""
     if user_id in ADMINS:
         return
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
-        update_user(user_id, messages_today=1)
+        update_user(user_id, usage_today=1)
     else:
-        update_user(user_id, messages_today=user['messages_today'] + 1)
+        update_user(user_id, usage_today=user['usage_today'] + 1)
 
 # ===== ПРОСТОЙ КАЛЬКУЛЯТОР =====
 def simple_calc(expr):
@@ -174,7 +172,7 @@ def main_menu(user_id):
         status = "🌟 Premium Light (10 запросов/день)"
     else:
         status = "🔓 Бесплатный (4 запроса/день)"
-    bonus = f"\n🎁 Бонус: +{user['bonus_messages']}" if user['bonus_messages'] > 0 else ""
+    bonus = f"\n🎁 Бонус: +{user['bonus_limit']}" if user['bonus_limit'] > 0 else ""
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("📊 Статистика", callback_data="stats"),
@@ -212,15 +210,15 @@ def start_cmd(message):
             user = get_user(user_id)
             if user['referred_by'] == 0:
                 update_user(user_id, referred_by=ref)
-                update_user(ref, bonus_messages=get_user(ref)['bonus_messages'] + REFERRAL_BONUS, referral_count=get_user(ref)['referral_count'] + 1)
-                bot.send_message(user_id, "🎁 +3 запроса/день по рефералке!")
-                bot.send_message(ref, "🎉 Новый реферал! +3 запроса/день!")
+                update_user(ref, bonus_limit=get_user(ref)['bonus_limit'] + REFERRAL_BONUS, referral_count=get_user(ref)['referral_count'] + 1)
+                bot.send_message(user_id, "🎁 +3 лимита в день по рефералке!")
+                bot.send_message(ref, "🎉 Новый реферал! +3 лимита в день!")
     markup, status = main_menu(user_id)
     bot.send_message(message.chat.id,
         f"🤖 *ReshiBot*\n\n"
         f"📸 Отправь фото — ИИ решит\n"
         f"✍️ Напиши пример (2+2) — калькулятор\n"
-        f"🎲 Случайный пример\n\n"
+        f"🎲 Случайный пример — не тратит лимит\n\n"
         f"💎 {status}\n👇",
         parse_mode='Markdown', reply_markup=markup)
 
@@ -233,9 +231,9 @@ def callback(call):
     elif call.data == "stats":
         user = get_user(user_id)
         today = datetime.now().strftime('%Y-%m-%d')
-        used = user['messages_today'] if user['last_date'] == today else 0
+        used = user['usage_today'] if user['last_date'] == today else 0
         limit = get_user_limit(user)
-        text = f"📊 *Статистика*\nСегодня: {used}/{limit}\nРефералов: {user['referral_count']}\nБонус: +{user['bonus_messages']}"
+        text = f"📊 *Статистика*\nСегодня использовано: {used}/{limit}\nРефералов: {user['referral_count']}\nБонус: +{user['bonus_limit']}"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "generate":
         ex, ans = generate_example()
@@ -252,7 +250,7 @@ def callback(call):
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "referral":
         link = f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
-        text = f"👥 *Твоя ссылка*\n{link}\nЗа каждого друга +3 запроса/день!"
+        text = f"👥 *Твоя ссылка*\n{link}\nЗа каждого друга +3 лимита в день!"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "buy_light":
         bot.send_invoice(call.message.chat.id, title="⭐ Premium Light", description="10 запросов/день", invoice_payload="light", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Light", PREMIUM_LIGHT_PRICE)])
@@ -280,7 +278,7 @@ def text_handler(m):
     text = m.text.strip()
     if text.startswith('/'):
         return
-    # Активный пример
+    # Если есть активный пример — отвечаем, лимит не тратим
     if user_id in active_tasks:
         try:
             ans = int(text)
@@ -294,34 +292,36 @@ def text_handler(m):
         except:
             bot.reply_to(m, "❓ Напиши число!", reply_markup=quick_buttons())
             return
-    # Проверка лимита (для запросов к ИИ и калькулятору)
-    if not can_send(user_id):
-        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов/день. Купи Premium!", reply_markup=quick_buttons())
+    # Для всего остального (калькулятор, ИИ) проверяем лимит
+    if not can_use(user_id):
+        markup, _ = main_menu(user_id)
+        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium или приведи друга!", reply_markup=markup)
         return
-    # Сначала пробуем простой калькулятор
+    # Пробуем калькулятор
     res = simple_calc(text)
     if res is not None:
         bot.reply_to(m, f"✅ {text} = {res}", reply_markup=quick_buttons())
-        increment_count(user_id)
+        increment_usage(user_id)
         return
-    # Если не пример — отправляем в ИИ
+    # Если не пример — отправляем в Gemini
     msg = bot.reply_to(m, "🤔 Думаю...")
     ans = ask_gemini(text)
-    increment_count(user_id)
+    increment_usage(user_id)
     bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
 # ===== ОБРАБОТКА ФОТО =====
 @bot.message_handler(content_types=['photo'])
 def photo_handler(m):
     user_id = m.from_user.id
-    if not can_send(user_id):
-        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов/день. Купи Premium!", reply_markup=quick_buttons())
+    if not can_use(user_id):
+        markup, _ = main_menu(user_id)
+        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium или приведи друга!", reply_markup=markup)
         return
     msg = bot.reply_to(m, "🔄 Распознаю...")
     file = bot.get_file(m.photo[-1].file_id)
     data = bot.download_file(file.file_path)
     ans = ask_gemini("Реши всё с этого фото. Подробно. Пиши по-русски.", data)
-    increment_count(user_id)
+    increment_usage(user_id)
     bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
 # ===== ЗАПУСК =====
