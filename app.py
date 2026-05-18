@@ -6,23 +6,30 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 import time
 import random
-import os
-from flask import Flask
-import threading
+import google.generativeai as genai
 
 # ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 OCR_API_KEY = 'K85192594388957'
+GEMINI_KEY = 'AIzaSyCHvp-BI4u3_6udQSRW09XHy--ETXYTFps'  # Твой ключ
+
+# Настройка Gemini
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 FREE_LIMIT = 4
 PREMIUM_LIGHT_LIMIT = 10
 PREMIUM_PRO_LIMIT = 999999
+
 PREMIUM_LIGHT_PRICE = 25
 PREMIUM_PRO_PRICE = 50
+
 REFERRAL_BONUS = 3
 REFERRAL_INCOME_PERCENT = 10
 
 bot = telebot.TeleBot(TOKEN)
+
+# Хранилище активных заданий
 active_tasks = {}
 
 # ===== БАЗА ДАННЫХ =====
@@ -146,23 +153,19 @@ def increment_photo_count(user_id):
     else:
         update_user(user_id, photos_today=user['photos_today'] + 1)
 
-def solve_math(text):
-    text = text.replace('×', '*').replace('÷', '/').replace('^', '**')
-    text = text.replace(',', '.').replace(' ', '')
-    
-    if not re.match(r'^[\d\s\+\-\*\/\(\)\=\.\^]+$', text):
-        return None, "❌ Неверный формат. Пиши числа и знаки: 2+2, 15*3, (4+2)/3"
-    
-    if 'x' in text.lower():
-        return None, "❌ Уравнения с x пока не поддерживаются. Пиши числовые примеры."
-    
+# ===== ФУНКЦИЯ ИИ (РЕШАЕТ ВСЁ) =====
+def ask_gemini(question, image_data=None):
     try:
-        result = eval(text)
-        return result, f"📐 {text} = {result}"
-    except ZeroDivisionError:
-        return None, "❌ Деление на ноль!"
-    except:
-        return None, "❌ Не могу решить. Проверь пример."
+        if image_data:
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(image_data))
+            response = model.generate_content([question, img])
+        else:
+            response = model.generate_content(question)
+        return response.text
+    except Exception as e:
+        return f"❌ Ошибка ИИ: {str(e)[:200]}"
 
 # ===== ГЕНЕРАТОР ПРИМЕРОВ =====
 def generate_example():
@@ -204,7 +207,7 @@ def get_top_users(limit=10):
         top_list.append((i, username, count))
     return top_list
 
-# ===== КНОПКИ БЫСТРОГО МЕНЮ =====
+# ===== КНОПКИ =====
 def quick_buttons():
     markup = InlineKeyboardMarkup(row_width=2)
     btn_generate = InlineKeyboardButton("🎲 Случайный пример", callback_data="generate")
@@ -239,7 +242,7 @@ def main_menu(user_id):
     
     return markup, status + bonus_text
 
-# ===== КОМАНДЫ БОТА =====
+# ===== КОМАНДЫ =====
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -274,15 +277,15 @@ def send_welcome(message):
     markup, status = main_menu(user_id)
     
     welcome_text = (
-        f"🚀 Добро пожаловать в ReshiBot!\n\n"
-        f"Я решаю математические примеры двумя способами:\n\n"
-        f"📸 Отправь фото — я распознаю и решу\n"
-        f"✍️ Напиши пример текстом — например: 15*3 или (2+2)*4\n\n"
+        f"🤖 *ReshiBot с ИИ*\n\n"
+        f"Я решаю ЛЮБЫЕ примеры, задачи и тесты!\n\n"
+        f"📸 Отправь фото — ИИ решит всё задание\n"
+        f"✍️ Напиши вопрос — например: реши уравнение 2x+5=15\n\n"
         f"💎 Твой статус: {status}\n\n"
         f"👇 Нажми на кнопку ниже"
     )
     
-    bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
+    bot.send_message(message.chat.id, welcome_text, parse_mode='Markdown', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -395,21 +398,21 @@ def handle_callback(call):
     
     elif call.data == "help":
         help_text = (
-            "❓ Как пользоваться ботом\n\n"
-            "1️⃣ Написать пример текстом\n"
-            "Просто напиши: 2+2, 15*3, (4+2)/3\n\n"
-            "2️⃣ Отправить фото\n"
-            "Сфоткай пример из учебника и отправь боту\n\n"
-            "3️⃣ Случайный пример\n"
+            "❓ *Как пользоваться ботом*\n\n"
+            "1️⃣ *Написать вопрос ИИ*\n"
+            "Просто напиши: реши уравнение 2x+5=15, найди производную x^2, объясни теорему Пифагора\n\n"
+            "2️⃣ *Отправить фото теста*\n"
+            "Сфоткай задание — ИИ решит всё за тебя\n\n"
+            "3️⃣ *Случайный пример*\n"
             "Нажми кнопку — бот даст задание, а ты напиши ответ\n\n"
-            "4️⃣ Купить Premium\n"
+            "4️⃣ *Купить Premium*\n"
             "⭐ Light (25 звёзд) — 10 фото/день\n"
             "👑 Pro (50 звёзд) — безлимит\n\n"
-            "5️⃣ Привести друга\n"
+            "5️⃣ *Привести друга*\n"
             "Нажми кнопку «Привести друга» и делись ссылкой"
         )
         bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, help_text, reply_markup=quick_buttons())
+        bot.send_message(call.message.chat.id, help_text, parse_mode='Markdown', reply_markup=quick_buttons())
 
 @bot.pre_checkout_query_handler(func=lambda query: True)
 def handle_pre_checkout(query):
@@ -449,6 +452,7 @@ def handle_payment(message):
             "✅ Premium Pro активирован!\n\nТеперь у тебя безлимит фото. Спасибо за поддержку! 👑"
         )
 
+# ===== ОБРАБОТКА ТЕКСТА (ИИ + ПРИМЕРЫ) =====
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
     user_id = message.from_user.id
@@ -460,6 +464,7 @@ def handle_text(message):
     username = message.from_user.username or ''
     update_user(user_id, username=username)
     
+    # Сначала проверяем, есть ли активное задание (генератор)
     if user_id in active_tasks:
         task = active_tasks[user_id]
         try:
@@ -478,24 +483,24 @@ def handle_text(message):
             bot.reply_to(message, "❓ Пожалуйста, напиши число — твой ответ на пример.", reply_markup=quick_buttons())
             return
     
-    if re.search(r'[\d\+\-\*\/\(\)\=]', text):
-        result, solution = solve_math(text)
-        
-        if result is not None:
-            response = f"✅ Решено!\n\n{solution}"
-            bot.reply_to(message, response, reply_markup=quick_buttons())
-        else:
-            bot.reply_to(message, solution, reply_markup=quick_buttons())
-    else:
-        markup, status = main_menu(user_id)
+    # Проверяем лимиты для ИИ-запросов
+    if not can_upload_photo(user_id):
+        user = get_user(user_id)
+        markup, _ = main_menu(user_id)
         bot.reply_to(
-            message, 
-            f"🤔 Я не распознал математический пример.\n\n"
-            f"Попробуй:\n• 15*3\n• (2+2)*4\n• Или отправь фото примера\n\n"
-            f"Твой статус: {status}",
+            message,
+            f"❌ Лимит запросов исчерпан!\n\nСегодня использовано: {user['photos_today']}/{get_user_limit(user)}\n\nКупи Premium для увеличения лимита!",
             reply_markup=markup
         )
+        return
+    
+    # Отправляем запрос к ИИ
+    msg = bot.reply_to(message, "🤔 Анализирую вопрос...")
+    answer = ask_gemini(text)
+    increment_photo_count(user_id)
+    bot.edit_message_text(answer, message.chat.id, msg.message_id)
 
+# ===== ОБРАБОТКА ФОТО (ИИ РАСПОЗНАЁТ) =====
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user_id = message.from_user.id
@@ -513,91 +518,32 @@ def handle_photo(message):
         )
         return
     
-    msg = bot.reply_to(message, "🔄 Распознаю и решаю...")
+    msg = bot.reply_to(message, "🔄 Распознаю и решаю тест через ИИ...")
     
     file_info = bot.get_file(message.photo[-1].file_id)
     file = bot.download_file(file_info.file_path)
     
-    response = requests.post(
-        'https://api.ocr.space/parse/image',
-        files={'file': ('image.jpg', file)},
-        data={'apikey': OCR_API_KEY, 'language': 'rus', 'OCREngine': 2}
-    )
+    # Отправляем фото в Gemini
+    question = "Реши задание с этого фото. Напиши подробное решение и ответ. Если это тест с несколькими заданиями, реши все. Пиши на русском."
+    answer = ask_gemini(question, file)
     
-    result = response.json()
-    if result.get('IsErroredOnProcessing') or not result.get('ParsedResults'):
-        bot.edit_message_text(
-            "❌ Не удалось распознать текст\n\nПопробуй:\n• Сфотографировать чётче\n• Написать пример текстом",
-            chat_id=message.chat.id, 
-            message_id=msg.message_id
-        )
-        return
-    
-    parsed_text = result['ParsedResults'][0]['ParsedText'].strip()
-    parsed_text = re.sub(r'[^0-9+\-*/()=.\s]', '', parsed_text)
-    
-    if not parsed_text:
-        bot.edit_message_text(
-            "❌ Текст не найден на фото\n\nПопробуй написать пример текстом",
-            chat_id=message.chat.id, 
-            message_id=msg.message_id
-        )
-        return
-    
-    answer, solution = solve_math(parsed_text)
-    
-    if answer is None:
-        bot.edit_message_text(
-            f"❌ Не удалось решить\n\nРаспознано: {parsed_text[:100]}\n\n{solution}",
-            chat_id=message.chat.id, 
-            message_id=msg.message_id
-        )
-    else:
-        increment_photo_count(user_id)
-        user = get_user(user_id)
-        limit = get_user_limit(user)
-        
-        if user['premium_level'] == 2:
-            remaining_text = "👑 Premium Pro — безлимит"
-        elif user['premium_level'] == 1:
-            remaining = limit - user['photos_today']
-            remaining_text = f"🌟 Premium Light — осталось: {remaining}/10 фото"
-        else:
-            remaining = limit - user['photos_today']
-            remaining_text = f"🔓 Бесплатно — осталось: {remaining}/{FREE_LIMIT} фото"
-            if user['bonus_photos'] > 0:
-                remaining_text += f"\n🎁 Бонус за рефералов: +{user['bonus_photos']}"
-        
-        bot.edit_message_text(
-            f"✅ Решено!\n\n{solution}\n\n{remaining_text}",
-            chat_id=message.chat.id, 
-            message_id=msg.message_id,
-            reply_markup=quick_buttons()
-        )
+    increment_photo_count(user_id)
+    bot.edit_message_text(answer, message.chat.id, msg.message_id, reply_markup=quick_buttons())
 
-# ===== ВЕБ-СЕРВЕР ДЛЯ RENDER =====
-app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "Bot is running!"
-
-@app.route('/health')
-def health():
-    return "OK", 200
-
-def run_bot():
+# ===== ЗАПУСК =====
+if __name__ == '__main__':
     init_db()
-    print("✅ Бот запущен!")
+    print("✅ Бот с ИИ Gemini запущен!")
+    print("📍 Поддерживаются:")
+    print("   - Текстовые вопросы (ИИ)")
+    print("   - Фото тестов и задач (ИИ)")
+    print("   - Генератор примеров")
+    print("   - Premium Light/Pro")
+    print("   - Реферальная система")
+    
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
             print(f"Ошибка: {e}")
             time.sleep(5)
-
-if __name__ == '__main__':
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.start()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
