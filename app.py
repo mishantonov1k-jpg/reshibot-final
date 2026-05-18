@@ -13,9 +13,9 @@ import io
 # ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 OCR_API_KEY = 'K85192594388957'
-GEMINI_KEY = 'AIzaSyCHvp-BI4u3_6udQSRW09XHy--ETXYTFps'
+GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'  # Новый ключ
 
-# ===== НАСТРОЙКА GEMINI (АВТОПОИСК МОДЕЛИ) =====
+# ===== НАСТРОЙКА GEMINI =====
 genai.configure(api_key=GEMINI_KEY)
 
 # Автоматически находим доступную модель
@@ -165,7 +165,7 @@ def increment_photo_count(user_id):
     else:
         update_user(user_id, photos_today=user['photos_today'] + 1)
 
-# ===== ФУНКЦИЯ ИИ (РЕШАЕТ ВСЁ) =====
+# ===== ФУНКЦИЯ ИИ =====
 def ask_gemini(question, image_data=None):
     if model is None:
         return "❌ ИИ недоступен. Попробуй позже."
@@ -464,7 +464,7 @@ def handle_payment(message):
             "✅ Premium Pro активирован!\n\nТеперь у тебя безлимит фото. Спасибо за поддержку! 👑"
         )
 
-# ===== ОБРАБОТКА ТЕКСТА (ИИ + ПРИМЕРЫ) =====
+# ===== ОБРАБОТКА ТЕКСТА =====
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
     user_id = message.from_user.id
@@ -476,7 +476,6 @@ def handle_text(message):
     username = message.from_user.username or ''
     update_user(user_id, username=username)
     
-    # Сначала проверяем активное задание (генератор)
     if user_id in active_tasks:
         task = active_tasks[user_id]
         try:
@@ -495,7 +494,6 @@ def handle_text(message):
             bot.reply_to(message, "❓ Пожалуйста, напиши число — твой ответ на пример.", reply_markup=quick_buttons())
             return
     
-    # Проверяем лимиты для ИИ-запросов
     if not can_upload_photo(user_id):
         user = get_user(user_id)
         markup, _ = main_menu(user_id)
@@ -506,13 +504,12 @@ def handle_text(message):
         )
         return
     
-    # Отправляем запрос к ИИ
     msg = bot.reply_to(message, "🤔 Анализирую вопрос...")
     answer = ask_gemini(text)
     increment_photo_count(user_id)
     bot.edit_message_text(answer, message.chat.id, msg.message_id, reply_markup=quick_buttons())
 
-# ===== ОБРАБОТКА ФОТО (ИИ РАСПОЗНАЁТ) =====
+# ===== ОБРАБОТКА ФОТО =====
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     user_id = message.from_user.id
