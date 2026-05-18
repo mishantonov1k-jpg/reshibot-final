@@ -15,22 +15,19 @@ TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 OCR_API_KEY = 'K85192594388957'
 GEMINI_KEY = 'AIzaSyCHvp-BI4u3_6udQSRW09XHy--ETXYTFps'
 
-# Настройка Gemini
+# ===== НАСТРОЙКА GEMINI (АВТОПОИСК МОДЕЛИ) =====
 genai.configure(api_key=GEMINI_KEY)
 
-# Автоматический выбор доступной модели
-available_models = []
+# Автоматически находим доступную модель
+model = None
 for m in genai.list_models():
     if 'generateContent' in m.supported_generation_methods:
-        available_models.append(m.name)
+        model = genai.GenerativeModel(m.name)
+        print(f"✅ Использую модель: {m.name}")
+        break
 
-if available_models:
-    model_name = available_models[0]
-    print(f"✅ Использую модель: {model_name}")
-    model = genai.GenerativeModel(model_name)
-else:
+if model is None:
     print("❌ Нет доступных моделей для generateContent")
-    model = None
 
 FREE_LIMIT = 4
 PREMIUM_LIGHT_LIMIT = 10
