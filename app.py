@@ -15,16 +15,19 @@ GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'
 # Администратор (безлимит)
 ADMINS = [1985646308]
 
-# Настройка Gemini
+# ===== АВТОМАТИЧЕСКИЙ ПОИСК МОДЕЛИ GEMINI =====
 genai.configure(api_key=GEMINI_KEY)
 model = None
 for m in genai.list_models():
     if 'generateContent' in m.supported_generation_methods:
         model = genai.GenerativeModel(m.name)
-        print(f"✅ Модель: {m.name}")
+        print(f"✅ Использую модель: {m.name}")
         break
 
-# Лимиты
+if model is None:
+    print("❌ Нет доступных моделей для generateContent")
+
+# ===== ЛИМИТЫ =====
 FREE_LIMIT = 4
 PREMIUM_LIGHT_LIMIT = 10
 PREMIUM_PRO_LIMIT = 999999
@@ -33,7 +36,7 @@ PREMIUM_PRO_PRICE = 50
 REFERRAL_BONUS = 3
 
 bot = telebot.TeleBot(TOKEN)
-active_tasks = {}
+active_tasks = {}  # для хранения активных примеров
 
 # ===== БАЗА ДАННЫХ =====
 def init_db():
@@ -172,7 +175,7 @@ def main_menu(user_id):
     )
     return markup, status + bonus
 
-# ===== ИИ =====
+# ===== ФУНКЦИЯ ИИ =====
 def ask_gemini(question, image_data=None):
     if model is None:
         return "❌ ИИ недоступен. Проверь подключение."
@@ -184,7 +187,7 @@ def ask_gemini(question, image_data=None):
             response = model.generate_content(question)
         return response.text
     except Exception as e:
-        return f"❌ Ошибка ИИ: {e}"
+        return f"❌ Ошибка ИИ: {str(e)}"
 
 # ===== КОМАНДЫ =====
 @bot.message_handler(commands=['start'])
@@ -204,7 +207,8 @@ def start_cmd(message):
     bot.send_message(message.chat.id,
         f"🤖 *ReshiBot*\n\n"
         f"📸 Отправь фото — ИИ решит\n"
-        f"✍️ Напиши вопрос — реши уравнение\n\n"
+        f"✍️ Напиши вопрос — реши уравнение\n"
+        f"🎲 Случайный пример — проверь себя\n\n"
         f"💎 {status}\n\n👇",
         parse_mode='Markdown', reply_markup=markup)
 
@@ -248,7 +252,7 @@ def callback(call):
     elif call.data == "buy_pro":
         bot.send_invoice(call.message.chat.id, title="👑 Premium Pro", description="Безлимит", invoice_payload="pro", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Pro", PREMIUM_PRO_PRICE)])
     elif call.data == "help":
-        text = "❓ *Помощь*\n✍️ Напиши любой вопрос\n📸 Отправь фото\n⭐ Купи Premium за Telegram Stars"
+        text = "❓ *Помощь*\n✍️ Напиши любой вопрос\n📸 Отправь фото\n🎲 Случайный пример\n⭐ Купи Premium за Telegram Stars"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
         bot.answer_callback_query(call.id)
 
@@ -269,6 +273,7 @@ def text_handler(m):
     text = m.text.strip()
     if text.startswith('/'):
         return
+    # Если есть активный пример — проверяем ответ
     if user_id in active_tasks:
         try:
             ans = int(text)
@@ -282,6 +287,7 @@ def text_handler(m):
         except:
             bot.reply_to(m, "❓ Напиши число!", reply_markup=quick_buttons())
             return
+    # Если нет активного примера — обрабатываем как запрос к ИИ
     if not can_send(user_id):
         bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов/день. Купи Premium!", reply_markup=quick_buttons())
         return
