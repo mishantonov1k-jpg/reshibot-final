@@ -1,20 +1,24 @@
 import telebot
+import requests
 import sqlite3
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import re
 import time
+import random
 import google.generativeai as genai
 from PIL import Image
 import io
-import random
-import re
 
+# ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
+OCR_API_KEY = 'K85192594388957'
 GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'
 
+# Администратор (безлимит)
 ADMINS = [1985646308]
 
-# Gemini
+# ===== НАСТРОЙКА GEMINI (автопоиск) =====
 genai.configure(api_key=GEMINI_KEY)
 model = None
 for m in genai.list_models():
@@ -40,43 +44,42 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
-            usage_today INTEGER DEFAULT 0,
+            photos_today INTEGER DEFAULT 0,
             last_date TEXT,
             premium_level INTEGER DEFAULT 0,
             referred_by INTEGER DEFAULT 0,
             referral_count INTEGER DEFAULT 0,
-            bonus_limit INTEGER DEFAULT 0,
+            bonus_photos INTEGER DEFAULT 0,
             username TEXT DEFAULT ''
         )
     ''')
-    c.execute("UPDATE users SET usage_today = 0, last_date = ?", (datetime.now().strftime('%Y-%m-%d'),))
     conn.commit()
     conn.close()
 
 def get_user(user_id):
     conn = sqlite3.connect('bot_users.db')
     c = conn.cursor()
-    c.execute('SELECT usage_today, last_date, premium_level, referred_by, referral_count, bonus_limit, username FROM users WHERE user_id = ?', (user_id,))
+    c.execute('SELECT photos_today, last_date, premium_level, referred_by, referral_count, bonus_photos, username FROM users WHERE user_id = ?', (user_id,))
     row = c.fetchone()
     conn.close()
     if row:
         return {
-            'usage_today': row[0],
+            'photos_today': row[0],
             'last_date': row[1],
             'premium_level': row[2],
             'referred_by': row[3],
             'referral_count': row[4],
-            'bonus_limit': row[5],
+            'bonus_photos': row[5],
             'username': row[6]
         }
     else:
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect('bot_users.db')
         c = conn.cursor()
-        c.execute('INSERT INTO users (user_id, usage_today, last_date, premium_level, referred_by, referral_count, bonus_limit, username) VALUES (?, 0, ?, 0, 0, 0, 0, ?)', (user_id, today, ''))
+        c.execute('INSERT INTO users (user_id, photos_today, last_date, premium_level, referred_by, referral_count, bonus_photos, username) VALUES (?, 0, ?, 0, 0, 0, 0, ?)', (user_id, today, ''))
         conn.commit()
         conn.close()
-        return {'usage_today': 0, 'last_date': today, 'premium_level': 0, 'referred_by': 0, 'referral_count': 0, 'bonus_limit': 0, 'username': ''}
+        return {'photos_today': 0, 'last_date': today, 'premium_level': 0, 'referred_by': 0, 'referral_count': 0, 'bonus_photos': 0, 'username': ''}
 
 def update_user(user_id, **kwargs):
     conn = sqlite3.connect('bot_users.db')
@@ -94,37 +97,51 @@ def get_user_limit(user):
         base = PREMIUM_LIGHT_LIMIT
     if base == PREMIUM_PRO_LIMIT:
         return base
-    return base + user['bonus_limit']
+    return base + user['bonus_photos']
 
-def can_use(user_id):
+def can_upload_photo(user_id):
     if user_id in ADMINS:
         return True
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
-        update_user(user_id, usage_today=0, last_date=today)
+        update_user(user_id, photos_today=0)
         return True
-    return user['usage_today'] < get_user_limit(user)
+    return user['photos_today'] < get_user_limit(user)
 
-def increment_usage(user_id):
+def increment_photo_count(user_id):
     if user_id in ADMINS:
         return
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
-        update_user(user_id, usage_today=1, last_date=today)
+        update_user(user_id, photos_today=1)
     else:
-        update_user(user_id, usage_today=user['usage_today'] + 1)
+        update_user(user_id, photos_today=user['photos_today'] + 1)
 
-# ===== КАЛЬКУЛЯТОР =====
-def simple_calc(expr):
-    expr = expr.replace(' ', '').replace('×', '*').replace('÷', '/')
-    if re.match(r'^[\d+\-*/\(\)]+$', expr):
+# ===== КАЛЬКУЛЯТОР ДЛЯ ПРОСТЫХ ПРИМЕРОВ =====
+def simple_calc(text):
+    text = text.replace(' ', '').replace('×', '*').replace('÷', '/')
+    if re.match(r'^[\d+\-*/\(\)]+$', text):
         try:
-            return eval(expr)
+            return eval(text)
         except:
             return None
     return None
+
+# ===== GEMINI ДЛЯ СЛОЖНЫХ ЗАПРОСОВ И ФОТО =====
+def ask_gemini(question, image_data=None):
+    if model is None:
+        return "❌ ИИ временно недоступен."
+    try:
+        if image_data:
+            img = Image.open(io.BytesIO(image_data))
+            response = model.generate_content([question, img])
+        else:
+            response = model.generate_content(question)
+        return response.text
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
 
 # ===== ГЕНЕРАТОР ПРИМЕРОВ =====
 def generate_example():
@@ -135,7 +152,8 @@ def generate_example():
         return f"{a} + {b}", a + b
     elif op == '-':
         return f"{a} - {b}", a - b
-    return f"{a} * {b}", a * b
+    else:
+        return f"{a} * {b}", a * b
 
 # ===== ТОП ПОЛЬЗОВАТЕЛЕЙ =====
 def get_top_users(limit=10):
@@ -164,10 +182,10 @@ def main_menu(user_id):
     if user['premium_level'] == 2:
         status = "👑 Premium Pro (безлимит)"
     elif user['premium_level'] == 1:
-        status = "🌟 Premium Light (10 запросов/день)"
+        status = "🌟 Premium Light (10 фото/день)"
     else:
-        status = "🔓 Бесплатный (4 запроса/день)"
-    bonus = f"\n🎁 Бонус: +{user['bonus_limit']}" if user['bonus_limit'] > 0 else ""
+        status = "🔓 Бесплатный (4 фото/день)"
+    bonus = f"\n🎁 Бонус: +{user['bonus_photos']}" if user['bonus_photos'] > 0 else ""
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("📊 Статистика", callback_data="stats"),
@@ -180,20 +198,6 @@ def main_menu(user_id):
     )
     return markup, status + bonus
 
-# ===== GEMINI ДЛЯ ТЕКСТА И ФОТО =====
-def ask_gemini(question, image_data=None):
-    if model is None:
-        return "❌ ИИ недоступен."
-    try:
-        if image_data:
-            img = Image.open(io.BytesIO(image_data))
-            response = model.generate_content([question, img])
-        else:
-            response = model.generate_content(question)
-        return response.text
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
-
 # ===== КОМАНДЫ =====
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
@@ -205,15 +209,15 @@ def start_cmd(message):
             user = get_user(user_id)
             if user['referred_by'] == 0:
                 update_user(user_id, referred_by=ref)
-                update_user(ref, bonus_limit=get_user(ref)['bonus_limit'] + REFERRAL_BONUS, referral_count=get_user(ref)['referral_count'] + 1)
-                bot.send_message(user_id, "🎁 +3 лимита в день по рефералке!")
-                bot.send_message(ref, "🎉 Новый реферал! +3 лимита в день!")
+                update_user(ref, bonus_photos=get_user(ref)['bonus_photos'] + REFERRAL_BONUS, referral_count=get_user(ref)['referral_count'] + 1)
+                bot.send_message(user_id, "🎁 +3 фото/день по рефералке!")
+                bot.send_message(ref, "🎉 Новый реферал! +3 фото/день!")
     markup, status = main_menu(user_id)
     bot.send_message(message.chat.id,
         f"🤖 *ReshiBot*\n\n"
-        f"📸 Отправь фото — ИИ решит\n"
+        f"📸 Отправь фото — OCR + ИИ решат\n"
         f"✍️ Напиши пример (2+2) — калькулятор\n"
-        f"🎲 Случайный пример — не тратит лимит\n\n"
+        f"🎲 Случайный пример — проверь себя\n\n"
         f"💎 {status}\n👇",
         parse_mode='Markdown', reply_markup=markup)
 
@@ -226,9 +230,9 @@ def callback(call):
     elif call.data == "stats":
         user = get_user(user_id)
         today = datetime.now().strftime('%Y-%m-%d')
-        used = user['usage_today'] if user['last_date'] == today else 0
+        used = user['photos_today'] if user['last_date'] == today else 0
         limit = get_user_limit(user)
-        text = f"📊 *Статистика*\nСегодня использовано: {used}/{limit}\nРефералов: {user['referral_count']}\nБонус: +{user['bonus_limit']}"
+        text = f"📊 *Статистика*\nСегодня использовано: {used}/{limit}\nРефералов: {user['referral_count']}\nБонус: +{user['bonus_photos']}"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "generate":
         ex, ans = generate_example()
@@ -245,10 +249,10 @@ def callback(call):
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "referral":
         link = f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
-        text = f"👥 *Твоя ссылка*\n{link}\nЗа каждого друга +3 лимита в день!"
+        text = f"👥 *Твоя ссылка*\n{link}\nЗа каждого друга +3 фото/день!"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "buy_light":
-        bot.send_invoice(call.message.chat.id, title="⭐ Premium Light", description="10 запросов/день", invoice_payload="light", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Light", PREMIUM_LIGHT_PRICE)])
+        bot.send_invoice(call.message.chat.id, title="⭐ Premium Light", description="10 фото/день", invoice_payload="light", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Light", PREMIUM_LIGHT_PRICE)])
     elif call.data == "buy_pro":
         bot.send_invoice(call.message.chat.id, title="👑 Premium Pro", description="Безлимит", invoice_payload="pro", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Pro", PREMIUM_PRO_PRICE)])
     elif call.data == "help":
@@ -266,7 +270,7 @@ def payment_success(message):
     update_user(message.from_user.id, premium_level=level)
     bot.send_message(message.chat.id, f"✅ Premium {'Light' if level==1 else 'Pro'} активирован!")
 
-# ===== ОБРАБОТКА ТЕКСТА =====
+# ===== ОБРАБОТКА ТЕКСТА (ПРИМЕРЫ И КАЛЬКУЛЯТОР) =====
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def text_handler(m):
     user_id = m.from_user.id
@@ -286,39 +290,64 @@ def text_handler(m):
         except:
             bot.reply_to(m, "❓ Напиши число!", reply_markup=quick_buttons())
             return
-    if not can_use(user_id):
-        markup, _ = main_menu(user_id)
-        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium или приведи друга!", reply_markup=markup)
-        return
+    # Сначала пробуем калькулятор
     res = simple_calc(text)
     if res is not None:
         bot.reply_to(m, f"✅ {text} = {res}", reply_markup=quick_buttons())
-        increment_usage(user_id)
+        increment_photo_count(user_id)
+        return
+    # Если не простой пример — отправляем в ИИ
+    if not can_upload_photo(user_id):
+        markup, _ = main_menu(user_id)
+        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium!", reply_markup=markup)
         return
     msg = bot.reply_to(m, "🤔 Думаю...")
     ans = ask_gemini(text)
-    increment_usage(user_id)
+    increment_photo_count(user_id)
     bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
-# ===== ОБРАБОТКА ФОТО (ТОЛЬКО GEMINI) =====
+# ===== ОБРАБОТКА ФОТО (OCR SPACE + GEMINI) =====
 @bot.message_handler(content_types=['photo'])
 def photo_handler(m):
     user_id = m.from_user.id
-    if not can_use(user_id):
+    if not can_upload_photo(user_id):
         markup, _ = main_menu(user_id)
-        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium или приведи друга!", reply_markup=markup)
+        bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} фото в день. Купи Premium!", reply_markup=markup)
         return
-    msg = bot.reply_to(m, "🔄 Распознаю и решаю через ИИ...")
+    msg = bot.reply_to(m, "🔄 Распознаю текст через OCR...")
     file = bot.get_file(m.photo[-1].file_id)
-    data = bot.download_file(file.file_path)
-    # Gemini сам распознаёт текст с картинки и решает пример
-    ans = ask_gemini("Реши этот пример. Напиши только ответ и решение. Если есть несколько заданий — реши все. Пиши по-русски.", data)
-    increment_usage(user_id)
-    bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
+    file_data = bot.download_file(file.file_path)
+    # Сначала OCR
+    ocr_response = requests.post(
+        'https://api.ocr.space/parse/image',
+        files={'file': ('img.jpg', file_data)},
+        data={'apikey': OCR_API_KEY, 'language': 'rus', 'OCREngine': 2},
+        timeout=30
+    )
+    ocr_data = ocr_response.json()
+    if ocr_data.get('IsErroredOnProcessing') or not ocr_data.get('ParsedResults'):
+        bot.edit_message_text("❌ Не удалось распознать текст. Сфоткай чётче.", m.chat.id, msg.message_id)
+        return
+    parsed = ocr_data['ParsedResults'][0]['ParsedText'].strip()
+    parsed = re.sub(r'[^0-9+\-*/()=.\s]', '', parsed)
+    if not parsed:
+        bot.edit_message_text("❌ Текст не найден на фото.", m.chat.id, msg.message_id)
+        return
+    # Решаем через калькулятор или ИИ
+    res = simple_calc(parsed)
+    if res is not None:
+        bot.edit_message_text(f"✅ {parsed} = {res}", m.chat.id, msg.message_id, reply_markup=quick_buttons())
+        increment_photo_count(user_id)
+        return
+    # Если калькулятор не смог — ИИ
+    bot.edit_message_text("🔄 Решаю через ИИ...", m.chat.id, msg.message_id)
+    ans = ask_gemini(f"Реши пример: {parsed}. Напиши только ответ.", None)
+    increment_photo_count(user_id)
+    bot.edit_message_text(f"✅ {ans}", m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
 if __name__ == '__main__':
     init_db()
-    print("✅ Бот запущен! Фото теперь решаются через Gemini.")
+    print("✅ Бот запущен!")
     while True:
         try:
             bot.infinity_polling(timeout=60)
