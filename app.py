@@ -13,16 +13,19 @@ import re
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'
 
+# Администратор (безлимит)
 ADMINS = [1985646308]
 
-# ===== GEMINI (только для сложного) =====
+# ===== НАСТРОЙКА GEMINI (автопоиск модели) =====
 genai.configure(api_key=GEMINI_KEY)
 model = None
 for m in genai.list_models():
     if 'generateContent' in m.supported_generation_methods:
         model = genai.GenerativeModel(m.name)
-        print(f"✅ Модель: {m.name}")
+        print(f"✅ Использую модель: {m.name}")
         break
+if model is None:
+    print("❌ Нет доступных моделей")
 
 # ===== ЛИМИТЫ =====
 FREE_LIMIT = 4
@@ -35,7 +38,7 @@ REFERRAL_BONUS = 3
 bot = telebot.TeleBot(TOKEN)
 active_tasks = {}
 
-# ===== БАЗА ДАННЫХ (как была) =====
+# ===== БАЗА ДАННЫХ =====
 def init_db():
     conn = sqlite3.connect('bot_users.db')
     c = conn.cursor()
@@ -98,6 +101,7 @@ def get_user_limit(user):
     return base + user['bonus_messages']
 
 def can_send(user_id):
+    # Админ — безлимит
     if user_id in ADMINS:
         return True
     user = get_user(user_id)
@@ -108,6 +112,7 @@ def can_send(user_id):
     return user['messages_today'] < get_user_limit(user)
 
 def increment_count(user_id):
+    # Админ не тратит лимит
     if user_id in ADMINS:
         return
     user = get_user(user_id)
@@ -117,15 +122,15 @@ def increment_count(user_id):
     else:
         update_user(user_id, messages_today=user['messages_today'] + 1)
 
-# ===== ПРОСТОЙ КАЛЬКУЛЯТОР (для чисел) =====
+# ===== ПРОСТОЙ КАЛЬКУЛЯТОР =====
 def simple_calc(expr):
     expr = expr.replace(' ', '').replace('×', '*').replace('÷', '/')
-    if not re.match(r'^[\d+\-*/\(\)]+$', expr):
-        return None
-    try:
-        return eval(expr)
-    except:
-        return None
+    if re.match(r'^[\d+\-*/\(\)]+$', expr):
+        try:
+            return eval(expr)
+        except:
+            return None
+    return None
 
 # ===== ГЕНЕРАТОР ПРИМЕРОВ =====
 def generate_example():
@@ -182,7 +187,7 @@ def main_menu(user_id):
     )
     return markup, status + bonus
 
-# ===== ЗАПРОС К GEMINI (только если калькулятор не смог) =====
+# ===== ЗАПРОС К GEMINI =====
 def ask_gemini(question, image_data=None):
     if model is None:
         return "❌ ИИ временно недоступен."
@@ -208,13 +213,13 @@ def start_cmd(message):
             if user['referred_by'] == 0:
                 update_user(user_id, referred_by=ref)
                 update_user(ref, bonus_messages=get_user(ref)['bonus_messages'] + REFERRAL_BONUS, referral_count=get_user(ref)['referral_count'] + 1)
-                bot.send_message(user_id, "🎁 +3 запроса/день!")
-                bot.send_message(ref, "🎉 +3 запроса/день!")
+                bot.send_message(user_id, "🎁 +3 запроса/день по рефералке!")
+                bot.send_message(ref, "🎉 Новый реферал! +3 запроса/день!")
     markup, status = main_menu(user_id)
     bot.send_message(message.chat.id,
         f"🤖 *ReshiBot*\n\n"
-        f"📸 Фото — ИИ решит\n"
-        f"✍️ Примеры типа 2+2 — калькулятор\n"
+        f"📸 Отправь фото — ИИ решит\n"
+        f"✍️ Напиши пример (2+2) — калькулятор\n"
         f"🎲 Случайный пример\n\n"
         f"💎 {status}\n👇",
         parse_mode='Markdown', reply_markup=markup)
@@ -275,7 +280,7 @@ def text_handler(m):
     text = m.text.strip()
     if text.startswith('/'):
         return
-    # Если активный пример
+    # Активный пример
     if user_id in active_tasks:
         try:
             ans = int(text)
@@ -289,17 +294,17 @@ def text_handler(m):
         except:
             bot.reply_to(m, "❓ Напиши число!", reply_markup=quick_buttons())
             return
-    # Проверяем лимит
+    # Проверка лимита (для запросов к ИИ и калькулятору)
     if not can_send(user_id):
         bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов/день. Купи Premium!", reply_markup=quick_buttons())
         return
     # Сначала пробуем простой калькулятор
-    result = simple_calc(text)
-    if result is not None:
-        bot.reply_to(m, f"✅ {text} = {result}", reply_markup=quick_buttons())
+    res = simple_calc(text)
+    if res is not None:
+        bot.reply_to(m, f"✅ {text} = {res}", reply_markup=quick_buttons())
         increment_count(user_id)
         return
-    # Если калькулятор не смог — отправляем в Gemini
+    # Если не пример — отправляем в ИИ
     msg = bot.reply_to(m, "🤔 Думаю...")
     ans = ask_gemini(text)
     increment_count(user_id)
