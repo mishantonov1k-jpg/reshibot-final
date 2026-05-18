@@ -13,7 +13,10 @@ import io
 # ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 OCR_API_KEY = 'K85192594388957'
-GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'  # Новый ключ
+GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'
+
+# ===== АДМИНИСТРАТОРЫ (БЕЗЛИМИТ) =====
+ADMINS = [1985646308]  # Администратор @upfacem
 
 # ===== НАСТРОЙКА GEMINI =====
 genai.configure(api_key=GEMINI_KEY)
@@ -146,6 +149,10 @@ def get_user_limit(user):
     return base_limit + user['bonus_photos']
 
 def can_upload_photo(user_id):
+    # Администраторы имеют безлимит
+    if user_id in ADMINS:
+        return True
+    
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
@@ -158,6 +165,10 @@ def can_upload_photo(user_id):
     return False
 
 def increment_photo_count(user_id):
+    # Администраторы не тратят лимит
+    if user_id in ADMINS:
+        return
+    
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
