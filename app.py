@@ -7,15 +7,30 @@ import re
 import time
 import random
 import google.generativeai as genai
+from PIL import Image
+import io
 
 # ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 OCR_API_KEY = 'K85192594388957'
-GEMINI_KEY = 'AIzaSyCHvp-BI4u3_6udQSRW09XHy--ETXYTFps'  # Твой ключ
+GEMINI_KEY = 'AIzaSyCHvp-BI4u3_6udQSRW09XHy--ETXYTFps'
 
 # Настройка Gemini
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+
+# Автоматический выбор доступной модели
+available_models = []
+for m in genai.list_models():
+    if 'generateContent' in m.supported_generation_methods:
+        available_models.append(m.name)
+
+if available_models:
+    model_name = available_models[0]
+    print(f"✅ Использую модель: {model_name}")
+    model = genai.GenerativeModel(model_name)
+else:
+    print("❌ Нет доступных моделей для generateContent")
+    model = None
 
 FREE_LIMIT = 4
 PREMIUM_LIGHT_LIMIT = 10
@@ -155,10 +170,10 @@ def increment_photo_count(user_id):
 
 # ===== ФУНКЦИЯ ИИ (РЕШАЕТ ВСЁ) =====
 def ask_gemini(question, image_data=None):
+    if model is None:
+        return "❌ ИИ недоступен. Попробуй позже."
     try:
         if image_data:
-            from PIL import Image
-            import io
             img = Image.open(io.BytesIO(image_data))
             response = model.generate_content([question, img])
         else:
@@ -464,7 +479,7 @@ def handle_text(message):
     username = message.from_user.username or ''
     update_user(user_id, username=username)
     
-    # Сначала проверяем, есть ли активное задание (генератор)
+    # Сначала проверяем активное задание (генератор)
     if user_id in active_tasks:
         task = active_tasks[user_id]
         try:
@@ -498,7 +513,7 @@ def handle_text(message):
     msg = bot.reply_to(message, "🤔 Анализирую вопрос...")
     answer = ask_gemini(text)
     increment_photo_count(user_id)
-    bot.edit_message_text(answer, message.chat.id, msg.message_id)
+    bot.edit_message_text(answer, message.chat.id, msg.message_id, reply_markup=quick_buttons())
 
 # ===== ОБРАБОТКА ФОТО (ИИ РАСПОЗНАЁТ) =====
 @bot.message_handler(content_types=['photo'])
@@ -523,7 +538,6 @@ def handle_photo(message):
     file_info = bot.get_file(message.photo[-1].file_id)
     file = bot.download_file(file_info.file_path)
     
-    # Отправляем фото в Gemini
     question = "Реши задание с этого фото. Напиши подробное решение и ответ. Если это тест с несколькими заданиями, реши все. Пиши на русском."
     answer = ask_gemini(question, file)
     
