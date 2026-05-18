@@ -9,23 +9,20 @@ import io
 import random
 import re
 
-# ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'
 
-# Администратор (безлимит)
 ADMINS = [1985646308]
 
-# ===== НАСТРОЙКА GEMINI (автопоиск модели) =====
+# Gemini setup
 genai.configure(api_key=GEMINI_KEY)
 model = None
 for m in genai.list_models():
     if 'generateContent' in m.supported_generation_methods:
         model = genai.GenerativeModel(m.name)
-        print(f"✅ Модель: {m.name}")
+        print(f"✅ Model: {m.name}")
         break
 
-# ===== ЛИМИТЫ =====
 FREE_LIMIT = 4
 PREMIUM_LIGHT_LIMIT = 10
 PREMIUM_PRO_LIMIT = 999999
@@ -36,7 +33,6 @@ REFERRAL_BONUS = 3
 bot = telebot.TeleBot(TOKEN)
 active_tasks = {}
 
-# ===== БАЗА ДАННЫХ =====
 def init_db():
     conn = sqlite3.connect('bot_users.db')
     c = conn.cursor()
@@ -52,6 +48,8 @@ def init_db():
             username TEXT DEFAULT ''
         )
     ''')
+    # Принудительно сбрасываем usage_today для всех (чтобы бот снова работал)
+    c.execute("UPDATE users SET usage_today = 0, last_date = ?", (datetime.now().strftime('%Y-%m-%d'),))
     conn.commit()
     conn.close()
 
@@ -99,28 +97,25 @@ def get_user_limit(user):
     return base + user['bonus_limit']
 
 def can_use(user_id):
-    """Проверяет, может ли пользователь отправить запрос (и ИИ, и калькулятор). Админ — всегда может."""
     if user_id in ADMINS:
         return True
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
-        update_user(user_id, usage_today=0)
+        update_user(user_id, usage_today=0, last_date=today)
         return True
     return user['usage_today'] < get_user_limit(user)
 
 def increment_usage(user_id):
-    """Увеличивает счётчик использованных запросов (только для полезных действий). Админа не считаем."""
     if user_id in ADMINS:
         return
     user = get_user(user_id)
     today = datetime.now().strftime('%Y-%m-%d')
     if user['last_date'] != today:
-        update_user(user_id, usage_today=1)
+        update_user(user_id, usage_today=1, last_date=today)
     else:
         update_user(user_id, usage_today=user['usage_today'] + 1)
 
-# ===== ПРОСТОЙ КАЛЬКУЛЯТОР =====
 def simple_calc(expr):
     expr = expr.replace(' ', '').replace('×', '*').replace('÷', '/')
     if re.match(r'^[\d+\-*/\(\)]+$', expr):
@@ -130,7 +125,6 @@ def simple_calc(expr):
             return None
     return None
 
-# ===== ГЕНЕРАТОР ПРИМЕРОВ =====
 def generate_example():
     a = random.randint(1, 20)
     b = random.randint(1, 20)
@@ -139,10 +133,8 @@ def generate_example():
         return f"{a} + {b}", a + b
     elif op == '-':
         return f"{a} - {b}", a - b
-    else:
-        return f"{a} * {b}", a * b
+    return f"{a} * {b}", a * b
 
-# ===== ТОП ПОЛЬЗОВАТЕЛЕЙ =====
 def get_top_users(limit=10):
     conn = sqlite3.connect('bot_users.db')
     c = conn.cursor()
@@ -154,7 +146,6 @@ def get_top_users(limit=10):
         top.append((i, name or str(uid), cnt))
     return top
 
-# ===== КНОПКИ =====
 def quick_buttons():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -185,7 +176,6 @@ def main_menu(user_id):
     )
     return markup, status + bonus
 
-# ===== ЗАПРОС К GEMINI =====
 def ask_gemini(question, image_data=None):
     if model is None:
         return "❌ ИИ временно недоступен."
@@ -199,7 +189,6 @@ def ask_gemini(question, image_data=None):
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
 
-# ===== КОМАНДЫ =====
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     user_id = message.from_user.id
@@ -271,14 +260,12 @@ def payment_success(message):
     update_user(message.from_user.id, premium_level=level)
     bot.send_message(message.chat.id, f"✅ Premium {'Light' if level==1 else 'Pro'} активирован!")
 
-# ===== ОБРАБОТКА ТЕКСТА =====
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def text_handler(m):
     user_id = m.from_user.id
     text = m.text.strip()
     if text.startswith('/'):
         return
-    # Если есть активный пример — отвечаем, лимит не тратим
     if user_id in active_tasks:
         try:
             ans = int(text)
@@ -292,24 +279,20 @@ def text_handler(m):
         except:
             bot.reply_to(m, "❓ Напиши число!", reply_markup=quick_buttons())
             return
-    # Для всего остального (калькулятор, ИИ) проверяем лимит
     if not can_use(user_id):
         markup, _ = main_menu(user_id)
         bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium или приведи друга!", reply_markup=markup)
         return
-    # Пробуем калькулятор
     res = simple_calc(text)
     if res is not None:
         bot.reply_to(m, f"✅ {text} = {res}", reply_markup=quick_buttons())
         increment_usage(user_id)
         return
-    # Если не пример — отправляем в Gemini
     msg = bot.reply_to(m, "🤔 Думаю...")
     ans = ask_gemini(text)
     increment_usage(user_id)
     bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
-# ===== ОБРАБОТКА ФОТО =====
 @bot.message_handler(content_types=['photo'])
 def photo_handler(m):
     user_id = m.from_user.id
@@ -324,7 +307,6 @@ def photo_handler(m):
     increment_usage(user_id)
     bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
-# ===== ЗАПУСК =====
 if __name__ == '__main__':
     init_db()
     print("✅ Бот запущен!")
