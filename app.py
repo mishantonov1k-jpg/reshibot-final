@@ -12,7 +12,7 @@ import io
 
 # ===== НАСТРОЙКИ =====
 TOKEN = '8824235185:AAGgHJ7j3s3L-ETeAupIsMpS1_028d5W8rs'
-GEMINI_KEY = 'AIzaSyCJVeSfH0NOUW8yABB99tSSMQFbQcQyUDg'  # НОВЫЙ КЛЮЧ
+GEMINI_KEY = 'AIzaSyDdH6aR1cckhy36mqeZ6KayNi3rm32gOzo'  # НОВЫЙ КЛЮЧ
 
 # ===== НАСТРОЙКА GEMINI =====
 genai.configure(api_key=GEMINI_KEY)
