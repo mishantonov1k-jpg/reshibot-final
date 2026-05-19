@@ -6,17 +6,16 @@ import time
 import google.generativeai as genai
 from PIL import Image
 import io
-import re
 import random
 
 # ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 GEMINI_KEY = 'AIzaSyCl_f0jRS8L-ufaybBoJ0pGXFr3fRXEMV8'
 
-# Администраторы (безлимит)
-ADMINS = [1985646308]  # Твой user_id
+# Администратор (безлимит)
+ADMINS = [1985646308]
 
-# ===== НАСТРОЙКА GEMINI =====
+# Настройка Gemini
 genai.configure(api_key=GEMINI_KEY)
 model = None
 for m in genai.list_models():
@@ -25,7 +24,8 @@ for m in genai.list_models():
         print(f"✅ Модель: {m.name}")
         break
 
-FREE_LIMIT = 4
+# Лимиты
+FREE_LIMIT = 100  # Временно 100, чтобы проверить работу
 PREMIUM_LIGHT_LIMIT = 10
 PREMIUM_PRO_LIMIT = 999999
 PREMIUM_LIGHT_PRICE = 25
@@ -122,12 +122,9 @@ def generate_example():
     a = random.randint(1, 20)
     b = random.randint(1, 20)
     op = random.choice(['+', '-', '*'])
-    if op == '+':
-        return f"{a} + {b}", a + b
-    elif op == '-':
-        return f"{a} - {b}", a - b
-    else:
-        return f"{a} * {b}", a * b
+    if op == '+': return f"{a} + {b}", a + b
+    elif op == '-': return f"{a} - {b}", a - b
+    else: return f"{a} * {b}", a * b
 
 # ===== ТОП ПОЛЬЗОВАТЕЛЕЙ =====
 def get_top_users(limit=10):
@@ -172,7 +169,7 @@ def main_menu(user_id):
     )
     return markup, status + bonus
 
-# ===== ЗАПРОС К GEMINI =====
+# ===== ЗАПРОС К GEMINI С ПРИНУДИТЕЛЬНЫМ РЕШЕНИЕМ =====
 def ask_gemini(question, image_data=None):
     if model is None:
         return "❌ ИИ недоступен."
@@ -203,8 +200,8 @@ def start_cmd(message):
     markup, status = main_menu(user_id)
     bot.send_message(message.chat.id,
         f"🤖 *ReshiBot*\n\n"
-        f"📸 Отправь фото — ИИ решит\n"
-        f"✍️ Напиши пример (2+2) — ИИ решит\n"
+        f"📸 Отправь фото — решу с подробным решением\n"
+        f"✍️ Напиши пример — решу по шагам\n"
         f"🎲 Случайный пример — проверь себя\n\n"
         f"💎 {status}\n👇",
         parse_mode='Markdown', reply_markup=markup)
@@ -228,24 +225,18 @@ def callback(call):
         bot.edit_message_text(f"🎲 *Реши пример*\n📝 {ex} = ?\n✍️ Напиши число", call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "top":
         top = get_top_users()
-        if not top:
-            text = "🏆 Топ пуст. Приводи друзей!"
-        else:
-            text = "🏆 *Топ рефералов*\n"
-            for i, name, cnt in top:
-                text += f"{i}. {name} — {cnt}\n"
+        if not top: text = "🏆 Топ пуст. Приводи друзей!"
+        else: text = "🏆 *Топ рефералов*\n" + "\n".join([f"{i}. {name} — {cnt}" for i, name, cnt in top])
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "referral":
         link = f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
-        text = f"👥 *Твоя ссылка*\n{link}\nЗа каждого друга +3 лимита в день!"
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
+        bot.edit_message_text(f"👥 *Твоя ссылка*\n{link}\nЗа каждого друга +3 лимита в день!", call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     elif call.data == "buy_light":
         bot.send_invoice(call.message.chat.id, title="⭐ Premium Light", description="10 запросов/день", invoice_payload="light", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Light", PREMIUM_LIGHT_PRICE)])
     elif call.data == "buy_pro":
         bot.send_invoice(call.message.chat.id, title="👑 Premium Pro", description="Безлимит", invoice_payload="pro", provider_token="", currency="XTR", prices=[telebot.types.LabeledPrice("Premium Pro", PREMIUM_PRO_PRICE)])
     elif call.data == "help":
-        text = "❓ *Помощь*\n✍️ Напиши любой пример\n📸 Отправь фото\n⭐ Premium за Stars"
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
+        bot.edit_message_text("❓ *Помощь*\n✍️ Напиши любой пример (2+2)\n📸 Отправь фото\n⭐ Premium за Stars", call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=quick_buttons())
     bot.answer_callback_query(call.id)
 
 @bot.pre_checkout_query_handler(func=lambda q: True)
@@ -263,8 +254,7 @@ def payment_success(message):
 def text_handler(m):
     user_id = m.from_user.id
     text = m.text.strip()
-    if text.startswith('/'):
-        return
+    if text.startswith('/'): return
     if user_id in active_tasks:
         try:
             ans = int(text)
@@ -281,10 +271,12 @@ def text_handler(m):
     if not can_use(user_id):
         bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium!", reply_markup=quick_buttons())
         return
-    msg = bot.reply_to(m, "🤔 Думаю...")
-    ans = ask_gemini(text)
+    msg = bot.reply_to(m, "🧮 Решаю с подробным решением...")
+    # Жёсткий промпт для Gemini
+    prompt = f"Реши пример: {text}. Напиши подробное решение по шагам. В конце напиши 'Ответ: ...'"
+    ans = ask_gemini(prompt)
     increment_usage(user_id)
-    bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
+    bot.edit_message_text(ans[:4000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
 # ===== ОБРАБОТКА ФОТО =====
 @bot.message_handler(content_types=['photo'])
@@ -293,16 +285,17 @@ def photo_handler(m):
     if not can_use(user_id):
         bot.reply_to(m, f"❌ Лимит {FREE_LIMIT} запросов в день. Купи Premium!", reply_markup=quick_buttons())
         return
-    msg = bot.reply_to(m, "🔄 Распознаю и решаю...")
+    msg = bot.reply_to(m, "🔄 Распознаю и решаю с подробным решением...")
     file = bot.get_file(m.photo[-1].file_id)
     data = bot.download_file(file.file_path)
-    ans = ask_gemini("Реши задание с этого фото. Напиши подробное решение и ответ. Если это тест с несколькими заданиями, реши все. Пиши на русском.", data)
+    prompt = "Реши задание с этого фото. Напиши подробное решение по шагам. Если это тест, реши все задания. В конце каждого задания напиши 'Ответ: ...'"
+    ans = ask_gemini(prompt, data)
     increment_usage(user_id)
-    bot.edit_message_text(ans[:3000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
+    bot.edit_message_text(ans[:4000], m.chat.id, msg.message_id, reply_markup=quick_buttons())
 
 if __name__ == '__main__':
     init_db()
-    print("✅ Бот запущен!")
+    print("✅ Бот запущен! Gemini настроен на подробные решения.")
     while True:
         try:
             bot.infinity_polling(timeout=60)
