@@ -13,7 +13,7 @@ import io
 # ===== НАСТРОЙКИ =====
 TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
 OCR_API_KEY = 'K85192594388957'
-GEMINI_KEY = 'AIzaSyCZFsLOwRF2RkCeLSzIm-K2T98S2V7Xg54'  # НОВЫЙ КЛЮЧ
+GEMINI_KEY = 'AIzaSyDAbc2jR_cdD0fukjA4kG1VFOEVdf2ZQA4'  # НОВЫЙ КЛЮЧ
 
 # ===== НАСТРОЙКА GEMINI =====
 genai.configure(api_key=GEMINI_KEY)
