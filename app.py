@@ -11,9 +11,8 @@ from PIL import Image
 import io
 
 # ===== НАСТРОЙКИ =====
-TOKEN = '8352640245:AAFlnxkvrHpW5foObSupcWTb3xOgYSYuujw'
-OCR_API_KEY = 'K85192594388957'
-GEMINI_KEY = 'AIzaSyDAbc2jR_cdD0fukjA4kG1VFOEVdf2ZQA4'  # НОВЫЙ КЛЮЧ
+TOKEN = '8824235185:AAGgHJ7j3s3L-ETeAupIsMpS1_028d5W8rs'
+GEMINI_KEY = 'AIzaSyCJVeSfH0NOUW8yABB99tSSMQFbQcQyUDg'  # НОВЫЙ КЛЮЧ
 
 # ===== НАСТРОЙКА GEMINI =====
 genai.configure(api_key=GEMINI_KEY)
